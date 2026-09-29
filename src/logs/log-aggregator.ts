@@ -102,9 +102,20 @@ function aggregateLogs(
       maxTimestamp = entry.timestamp;
     }
 
-    // Skip benign operational entries (connection closures without HTTP headers)
-    // These appear during healthchecks and shutdown-time keep-alive connection closures
-    if (entry.url === 'error:transaction-end-before-headers') {
+    // Skip NONE-decision entries entirely — they never represent an actual
+    // allow/deny outcome, only a "no hierarchy action taken" placeholder. Two
+    // cases produce them:
+    //   1. Benign operational entries (connection closures without HTTP
+    //      headers), e.g. health checks and shutdown-time keep-alive closures.
+    //   2. The `ssl_bump peek` step1 log line Squid emits for *every*
+    //      intercepted HTTPS CONNECT before the TLS ClientHello SNI is known
+    //      (dest "-:-", decision "NONE_NONE"). This is immediately followed by
+    //      a second log line with the real decision (TCP_TUNNEL via
+    //      `ssl_bump splice`, or TCP_DENIED via `ssl_bump terminate`) once the
+    //      SNI-based ACL check runs. Counting the step1 placeholder as
+    //      "denied" doubles the reported denied count for every allowed HTTPS
+    //      domain and inflates it further for genuinely blocked domains.
+    if (entry.decision.startsWith('NONE')) {
       continue;
     }
 

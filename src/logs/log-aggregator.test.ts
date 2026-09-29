@@ -161,6 +161,41 @@ describe('log-aggregator', () => {
       expectOnlyValidTunnelStats(stats);
     });
 
+    it('should not count ssl_bump peek step1 NONE_NONE entries as denied', () => {
+      // Squid's `ssl_bump peek` step1 logs a NONE_NONE placeholder line for
+      // every intercepted HTTPS CONNECT, before the ClientHello SNI is known.
+      // A second, real-decision line (TCP_TUNNEL here) follows once the
+      // SNI-based ACL check runs. The step1 placeholder must not be counted
+      // as a denied request for an allowed domain.
+      const entries: ParsedLogEntry[] = [
+        createLogEntry({
+          domain: 'example.com',
+          url: 'example.com:443',
+          decision: 'NONE_NONE:HIER_NONE',
+          statusCode: 0,
+          isAllowed: false,
+        }),
+        createLogEntry({
+          domain: 'example.com',
+          url: 'example.com:443',
+          decision: 'TCP_TUNNEL:HIER_DIRECT',
+          isAllowed: true,
+        }),
+      ];
+
+      const stats = aggregateLogs(entries);
+
+      expect(stats.totalRequests).toBe(1);
+      expect(stats.allowedRequests).toBe(1);
+      expect(stats.deniedRequests).toBe(0);
+      expect(stats.byDomain.get('example.com')).toEqual({
+        domain: 'example.com',
+        allowed: 1,
+        denied: 0,
+        total: 1,
+      });
+    });
+
     it('should still count time range from all entries including filtered ones', () => {
       const entries: ParsedLogEntry[] = [
         createLogEntry({ 
